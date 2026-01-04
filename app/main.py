@@ -1,10 +1,14 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, FastAPI
+import asyncio
 from typing import List
 from pathlib import Path
 import shutil
 import re
 
 router = APIRouter()
+
+# Expose a FastAPI app from this module so uvicorn app.main:app works
+app = FastAPI(title="syllabus-rag-qna generate")
 
 
 def _safe_text_from_pdf(path: Path) -> List[str]:
@@ -122,7 +126,8 @@ async def generate(file: UploadFile = File(...), question: str = Form(...)):
         raise HTTPException(status_code=500, detail=f"LLM helper not available: {e}")
 
     try:
-        answer = run_llm(prompt, model_name="distilgpt2", max_new_tokens=200)
+        # run the CPU-bound LLM in a thread to avoid blocking the event loop
+        answer = await asyncio.to_thread(run_llm, prompt, "distilgpt2", 200)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {e}")
 
@@ -131,3 +136,15 @@ async def generate(file: UploadFile = File(...), question: str = Form(...)):
         "context_chunks": top_k,
         "scores": [s for s, c in scored[:5]],
     }
+
+
+# include router after route definitions so routes are registered on the app
+app.include_router(router)
+
+# include server routes (env-check, llm, process) from app.server
+try:
+    from app.server import router as server_router
+    app.include_router(server_router)
+except Exception:
+    # if import fails, the app will still run with /generate only
+    pass

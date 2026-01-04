@@ -1,18 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import importlib.metadata as importlib_metadata
 from pathlib import Path
 
-app = FastAPI(title="syllabus-rag-qna API")
-
-# include routes from app.main (generate endpoint)
-try:
-    from app.main import router as main_router
-    app.include_router(main_router)
-except Exception:
-    # if the import fails, the server will still start but /generate won't be available
-    pass
+router = APIRouter()
 
 
 def get_package_versions(pkg_list):
@@ -25,7 +17,7 @@ def get_package_versions(pkg_list):
     return out
 
 
-@app.get("/env-check")
+@router.get("/env-check")
 def env_check():
     pkgs = [
         "langchain",
@@ -46,7 +38,7 @@ class LLMRequest(BaseModel):
     max_new_tokens: Optional[int] = 50
 
 
-@app.post("/llm")
+@router.post("/llm")
 def llm_endpoint(req: LLMRequest):
     # import the run_llm helper from main.py (lazy heavy imports are inside)
     try:
@@ -66,7 +58,7 @@ class ProcessRequest(BaseModel):
     sample: Optional[bool] = False
 
 
-@app.post("/process")
+@router.post("/process")
 def process_endpoint(req: ProcessRequest):
     try:
         from main import load_pdfs, split_documents
