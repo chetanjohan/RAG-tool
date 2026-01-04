@@ -66,10 +66,45 @@ def smoke_test_env():
             print(f"{dist_name}: not installed or import failed ({e.__class__.__name__})")
 
 
+def run_llm(prompt: str, model_name: str = "gpt2", max_new_tokens: int = 50):
+    """Run a very small LLM text-generation locally using transformers.
+
+    This function imports heavy libraries only when called. It uses a CPU
+    fallback and keeps defaults small so it works on low-resource machines.
+    """
+    # local imports to avoid top-level dependency on transformers/torch
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch
+    except Exception as e:
+        raise RuntimeError("transformers and torch must be installed to run the LLM") from e
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model.to(device)
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    # keep generation conservative on CPU
+    gen = model.generate(**inputs, max_new_tokens=max_new_tokens)
+    out = tokenizer.decode(gen[0], skip_special_tokens=True)
+    return out
+
+
 if __name__ == "__main__":
     # run a light environment check without loading langchain-heavy modules
     if len(sys.argv) > 1 and sys.argv[1] == "env-check":
         smoke_test_env()
+        sys.exit(0)
+    # run llm: python main.py llm "your prompt here"
+    if len(sys.argv) > 2 and sys.argv[1] == "llm":
+        prompt = sys.argv[2]
+        model = sys.argv[3] if len(sys.argv) > 3 else "gpt2"
+        print("Running LLM (this may download model weights on first run)...")
+        out = run_llm(prompt, model_name=model)
+        print("\n--- LLM OUTPUT ---\n")
+        print(out)
         sys.exit(0)
 
     docs = load_pdfs(DATA_DIR)
