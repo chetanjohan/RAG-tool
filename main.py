@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import argparse
 import importlib
 import importlib.metadata as importlib_metadata
 
@@ -93,26 +94,53 @@ def run_llm(prompt: str, model_name: str = "gpt2", max_new_tokens: int = 50):
 
 
 if __name__ == "__main__":
-    # run a light environment check without loading langchain-heavy modules
-    if len(sys.argv) > 1 and sys.argv[1] == "env-check":
-        smoke_test_env()
-        sys.exit(0)
-    # run llm: python main.py llm "your prompt here"
-    if len(sys.argv) > 2 and sys.argv[1] == "llm":
-        prompt = sys.argv[2]
-        model = sys.argv[3] if len(sys.argv) > 3 else "gpt2"
-        print("Running LLM (this may download model weights on first run)...")
-        out = run_llm(prompt, model_name=model)
-        print("\n--- LLM OUTPUT ---\n")
-        print(out)
-        sys.exit(0)
+    def cli():
+        parser = argparse.ArgumentParser(
+            description="CLI wrapper for syllabus-rag-qna: env-check, llm, and PDF processing"
+        )
+        sub = parser.add_subparsers(dest="command", required=True)
 
-    docs = load_pdfs(DATA_DIR)
-    print(f"Loaded {len(docs)} pages")
+        sub.add_parser("env-check", help="Print installed package versions for debugging the env")
 
-    chunks = split_documents(docs)
-    print(f"Created {len(chunks)} text chunks")
+        p_llm = sub.add_parser("llm", help="Run a small LLM generation (requires transformers+torch)")
+        p_llm.add_argument("prompt", help="Prompt text to send to the model")
+        p_llm.add_argument("--model", default="gpt2", help="Model name (default: gpt2)")
+        p_llm.add_argument("--max-new-tokens", type=int, default=50, help="Max new tokens to generate")
 
-    # sanity check
-    print("\n--- SAMPLE CHUNK ---\n")
-    print(chunks[0].page_content[:500])
+        p_proc = sub.add_parser("process", help="Load PDFs from data dir, split into chunks, and show counts")
+        p_proc.add_argument("--data-dir", default="data", help="Directory containing PDFs (default: data)")
+        p_proc.add_argument("--sample", action="store_true", help="Print a sample chunk's text")
+
+        args = parser.parse_args()
+
+        if args.command == "env-check":
+            smoke_test_env()
+            return
+
+        if args.command == "llm":
+            print("Running LLM (this may download model weights on first run)...")
+            out = run_llm(args.prompt, model_name=args.model, max_new_tokens=args.max_new_tokens)
+            print("\n--- LLM OUTPUT ---\n")
+            print(out)
+            return
+
+        if args.command == "process":
+            data_path = Path(args.data_dir)
+            try:
+                docs = load_pdfs(data_path)
+            except Exception as e:
+                print(f"Failed to load PDFs: {e.__class__.__name__}: {e}")
+                print("Make sure the 'langchain' loader dependencies are installed (langchain/document_loaders)")
+                return
+
+            print(f"Loaded {len(docs)} pages")
+            chunks = split_documents(docs)
+            print(f"Created {len(chunks)} text chunks")
+            if args.sample:
+                if chunks:
+                    print("\n--- SAMPLE CHUNK ---\n")
+                    print(chunks[0].page_content[:1000])
+                else:
+                    print("No chunks available to sample.")
+
+    cli()
