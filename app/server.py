@@ -6,6 +6,14 @@ from pathlib import Path
 
 app = FastAPI(title="syllabus-rag-qna API")
 
+# include routes from app.main (generate endpoint)
+try:
+    from app.main import router as main_router
+    app.include_router(main_router)
+except Exception:
+    # if the import fails, the server will still start but /generate won't be available
+    pass
+
 
 def get_package_versions(pkg_list):
     out = {}
