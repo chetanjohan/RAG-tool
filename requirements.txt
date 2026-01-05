@@ -9,3 +9,5 @@ accelerate==1.12.0
 torch==2.9.1
 fastapi
 uvicorn[standard]
+regex
+numpy
