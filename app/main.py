@@ -4,11 +4,21 @@ from typing import List
 from pathlib import Path
 import shutil
 import re
+from fastapi.middleware.cors import CORSMiddleware
+
 
 router = APIRouter()
 
 # Expose a FastAPI app from this module so uvicorn app.main:app works
 app = FastAPI(title="syllabus-rag-qna generate")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 
 def _safe_text_from_pdf(path: Path) -> List[str]:
@@ -42,24 +52,32 @@ def _safe_text_from_pdf(path: Path) -> List[str]:
     raise RuntimeError("No available PDF loader (install langchain or pypdf)")
 
 
-def _split_texts(pages: List[str], chunk_size: int = 500, overlap: int = 100) -> List[str]:
-    """Split page texts into overlapping chunks. Returns list of chunk strings."""
+def _split_texts(pages, chunk_size=800, overlap=200, max_chunks=50):
     chunks = []
-    for page in pages:
-        text = page.strip()
-        if not text:
-            continue
+    for text in pages:
         start = 0
-        L = len(text)
-        while start < L:
-            end = min(start + chunk_size, L)
+        # safety: ensure overlap is smaller than chunk_size to make forward progress
+        if overlap >= chunk_size:
+            overlap = max(1, chunk_size // 2)
+        # safety: avoid producing an enormous number of chunks that could exhaust memory
+        max_chunks = 20000
+        while start < len(text):
+            end = start + chunk_size
             chunks.append(text[start:end])
-            start = end - overlap
-            if start < 0:
-                start = 0
-            if start >= L:
+            iterations = 0
+            if len(chunks) >= max_chunks:
+                # stop splitting further to avoid memory blowup
                 break
+            # advance start: ensure progress and avoid infinite loops
+            new_start = end - overlap
+            if new_start <= start:
+                # no forward progress; move to end to avoid infinite loop
+                start = end
+            else:
+                start = new_start
+            start = end - overlap
     return chunks
+
 
 
 def _score_chunks(question: str, chunks: List[str]) -> List[tuple]:
@@ -111,12 +129,29 @@ async def generate(file: UploadFile = File(...), question: str = Form(...)):
     # Score and pick top-k
     scored = _score_chunks(question, chunks)
     top_k = [c for s, c in scored[:5] if s > 0]
+    if not top_k:
+        return {
+            "answer": "Answer not found in document.",
+            "context_chunks": [],
+            "scores": []
+    }
 
-    # Prepare context
+
+    # Prepare context and a strict, exam-focused instruction for the LLM.
     context = "\n\n---\n\n".join(top_k)
+    # The model must not use any external knowledge. It should answer strictly from the
+    # provided context. If the answer cannot be found in the context, reply exactly
+    # "Answer not found in document." Produce the response in an exam-focused style
+    # (concise answer followed by 2-3 short exam-style bullets for study/revision).
     prompt = (
-        "You are an assistant that answers questions using the provided context."
-        "\nContext:\n" + context + "\n\nQuestion:\n" + question + "\n\nAnswer:"
+        "You are an exam assistant. Use ONLY the CONTEXT below to answer the QUESTION. "
+        "Do NOT use any outside knowledge. If the information to answer the question is not "
+        "present in the CONTEXT, respond exactly: 'Answer not found in document.'\n\n"
+        "CONTEXT:\n" + context + "\n\nQUESTION:\n" + question + "\n\n"
+        "INSTRUCTIONS:\n1) If answer is present in the context, write a short direct answer (1-3 sentences). "
+        "2) Then add 2 short exam-style bullet points summarizing the key facts or how to remember them. "
+        "3) If the answer is NOT present, respond exactly with 'Answer not found in document.'\n\n"
+        "ANSWER:\n"
     )
 
     # Call existing LLM helper
