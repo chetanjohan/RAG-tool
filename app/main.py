@@ -1,3 +1,6 @@
+import importlib
+print("DEBUG multipart import", importlib.util.find_spec("multipart"))
+
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, FastAPI
 import asyncio
 from typing import List
@@ -14,10 +17,12 @@ app = FastAPI(title="syllabus-rag-qna generate")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 
 
 
@@ -98,79 +103,89 @@ def _score_chunks(question: str, chunks: List[str]) -> List[tuple]:
     return scored
 
 
-@router.post("/generate")
-async def generate(file: UploadFile = File(...), question: str = Form(...)):
-    """Accept a PDF file upload and a question, run simple RAG retrieval and generate an answer.
+try:
+    @router.post("/generate")
+    async def generate(file: UploadFile = File(...), question: str = Form(...)):
+        """Accept a PDF file upload and a question, run simple RAG retrieval and generate an answer.
 
-    Returns JSON {answer, context_chunks, scores}
-    """
-    uploads_dir = Path("data/uploads")
-    uploads_dir.mkdir(parents=True, exist_ok=True)
+        Returns JSON {answer, context_chunks, scores}
+        """
+        uploads_dir = Path("data/uploads")
+        uploads_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save uploaded file
-    fname = uploads_dir / file.filename
-    try:
-        with fname.open("wb") as out_f:
-            shutil.copyfileobj(file.file, out_f)
-    finally:
-        file.file.close()
+        # Save uploaded file
+        fname = uploads_dir / file.filename
+        try:
+            with fname.open("wb") as out_f:
+                shutil.copyfileobj(file.file, out_f)
+        finally:
+            file.file.close()
 
-    # Extract page texts
-    try:
-        pages = _safe_text_from_pdf(fname)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to extract PDF text: {e}")
+        # Extract page texts
+        try:
+            pages = _safe_text_from_pdf(fname)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to extract PDF text: {e}")
 
-    # Split into chunks
-    chunks = _split_texts(pages, chunk_size=800, overlap=200)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No text extracted from PDF")
+        # Split into chunks
+        chunks = _split_texts(pages, chunk_size=800, overlap=200)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="No text extracted from PDF")
 
-    # Score and pick top-k
-    scored = _score_chunks(question, chunks)
-    top_k = [c for s, c in scored[:5] if s > 0]
-    if not top_k:
+        # Score and pick top-k
+        scored = _score_chunks(question, chunks)
+        top_k = [c for s, c in scored[:5] if s > 0]
+        if not top_k:
+            return {
+                "answer": "Answer not found in document.",
+                "context_chunks": [],
+                "scores": []
+        }
+
+        # Prepare context and a strict, exam-focused instruction for the LLM.
+        context = "\n\n---\n\n".join(top_k)
+        prompt = (
+            "You are an exam assistant. Use ONLY the CONTEXT below to answer the QUESTION. "
+            "Do NOT use any outside knowledge. If the information to answer the question is not "
+            "present in the CONTEXT, respond exactly: 'Answer not found in document.'\n\n"
+            "CONTEXT:\n" + context + "\n\nQUESTION:\n" + question + "\n\n"
+            "INSTRUCTIONS:\n1) If answer is present in the context, write a short direct answer (1-3 sentences). "
+            "2) Then add 2 short exam-style bullet points summarizing the key facts or how to remember them. "
+            "3) If the answer is NOT present, respond exactly with 'Answer not found in document.'\n\n"
+            "ANSWER:\n"
+        )
+
+        # Call existing LLM helper
+        try:
+            from main import run_llm
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"LLM helper not available: {e}")
+
+        try:
+            # run the CPU-bound LLM in a thread to avoid blocking the event loop
+            answer = await asyncio.to_thread(run_llm, prompt, "distilgpt2", 200)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"LLM generation failed: {e}")
+
         return {
-            "answer": "Answer not found in document.",
-            "context_chunks": [],
-            "scores": []
-    }
-
-
-    # Prepare context and a strict, exam-focused instruction for the LLM.
-    context = "\n\n---\n\n".join(top_k)
-    # The model must not use any external knowledge. It should answer strictly from the
-    # provided context. If the answer cannot be found in the context, reply exactly
-    # "Answer not found in document." Produce the response in an exam-focused style
-    # (concise answer followed by 2-3 short exam-style bullets for study/revision).
-    prompt = (
-        "You are an exam assistant. Use ONLY the CONTEXT below to answer the QUESTION. "
-        "Do NOT use any outside knowledge. If the information to answer the question is not "
-        "present in the CONTEXT, respond exactly: 'Answer not found in document.'\n\n"
-        "CONTEXT:\n" + context + "\n\nQUESTION:\n" + question + "\n\n"
-        "INSTRUCTIONS:\n1) If answer is present in the context, write a short direct answer (1-3 sentences). "
-        "2) Then add 2 short exam-style bullet points summarizing the key facts or how to remember them. "
-        "3) If the answer is NOT present, respond exactly with 'Answer not found in document.'\n\n"
-        "ANSWER:\n"
-    )
-
-    # Call existing LLM helper
-    try:
-        from main import run_llm
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM helper not available: {e}")
-
-    try:
-        # run the CPU-bound LLM in a thread to avoid blocking the event loop
-        answer = await asyncio.to_thread(run_llm, prompt, "distilgpt2", 200)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"LLM generation failed: {e}")
-
-    return {
-        "answer": answer,
-        "context_chunks": top_k,
-        "scores": [s for s, c in scored[:5]],
-    }
+            "answer": answer,
+            "context_chunks": top_k,
+            "scores": [s for s, c in scored[:5]],
+        }
+except RuntimeError as _route_err:
+    # If FastAPI raises a RuntimeError during route registration (for example,
+    # the multipart dependency is missing), register a fallback route that
+    # returns a clear error message instead of letting the import-time error
+    # crash the app.
+    @router.post("/generate")
+    async def generate_disabled():
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "/generate endpoint unavailable: import-time error during route registration. "
+                f"Underlying error: {_route_err}. Install python-multipart or check server logs."
+            ),
+        )
 
 
 # include router after route definitions so routes are registered on the app
