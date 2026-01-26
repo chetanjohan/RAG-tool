@@ -14,9 +14,13 @@ router = APIRouter()
 
 # Expose a FastAPI app from this module so uvicorn app.main:app works
 app = FastAPI(title="syllabus-rag-qna generate")
+
+# CORS MUST COME IMMEDIATELY AFTER app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://study-buddy-ai-5d935db1.base44.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
