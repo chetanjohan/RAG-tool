@@ -29,19 +29,7 @@ app.add_middleware(
 )
 
 
-# TEMP: Test endpoint to confirm CORS is working
-@app.post("/generate")
-async def generate_test(request: Request):
-    """Temporary test endpoint - no auth required"""
-    # TEMP: comment out auth checks just to confirm CORS works
-    # token = request.headers.get("Authorization")
-    # if token != EXPECTED_TOKEN:
-    #     raise HTTPException(status_code=401, detail="Unauthorized")
 
-    return {"ok": True}
-
-
-# Original router routes will be defined below
 def _safe_text_from_pdf(path: Path) -> List[str]:
     """Try to extract text from PDF with several fallbacks.
 
