@@ -1,7 +1,7 @@
 import importlib
 print("DEBUG multipart import", importlib.util.find_spec("multipart"))
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, FastAPI
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, FastAPI, Request
 import asyncio
 from typing import List
 from pathlib import Path
@@ -16,20 +16,32 @@ router = APIRouter()
 app = FastAPI(title="syllabus-rag-qna generate")
 
 # CORS MUST COME IMMEDIATELY AFTER app = FastAPI()
+origins = [
+    "https://study-buddy-ai-5d935db1.base44.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://study-buddy-ai-5d935db1.base44.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["https://study-buddy-ai-5d935db1.base44.app/"],
-    allow_headers=["https://study-buddy-ai-5d935db1.base44.app/"],
+    allow_origins=origins,
+    allow_credentials=True,   # keep True only if you actually use cookies/auth
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
+# TEMP: Test endpoint to confirm CORS is working
+@app.post("/generate")
+async def generate_test(request: Request):
+    """Temporary test endpoint - no auth required"""
+    # TEMP: comment out auth checks just to confirm CORS works
+    # token = request.headers.get("Authorization")
+    # if token != EXPECTED_TOKEN:
+    #     raise HTTPException(status_code=401, detail="Unauthorized")
+
+    return {"ok": True}
 
 
-
+# Original router routes will be defined below
 def _safe_text_from_pdf(path: Path) -> List[str]:
     """Try to extract text from PDF with several fallbacks.
 
