@@ -18,12 +18,13 @@ app = FastAPI(title="syllabus-rag-qna generate")
 # CORS MUST COME IMMEDIATELY AFTER app = FastAPI()
 origins = [
     "https://study-buddy-ai-5d935db1.base44.app",
+    "https://study-buddy-ai-5d935db1.base44.app/*"  # extra safety
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,   # keep True only if you actually use cookies/auth
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
