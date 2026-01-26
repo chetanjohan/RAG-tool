@@ -22,8 +22,8 @@ app.add_middleware(
         "https://study-buddy-ai-5d935db1.base44.app"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["https://study-buddy-ai-5d935db1.base44.app/"],
+    allow_headers=["https://study-buddy-ai-5d935db1.base44.app/"],
 )
 
 
